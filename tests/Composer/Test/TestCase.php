@@ -102,7 +102,7 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
         $root = sys_get_temp_dir();
 
         do {
-            $unique = $root . DIRECTORY_SEPARATOR . uniqid('composer-test-' . random_int(1000, 9000));
+            $unique = $root . DIRECTORY_SEPARATOR . 'composer-test-' . bin2hex(random_bytes(10));
 
             if (!file_exists($unique) && Silencer::call('mkdir', $unique, 0777)) {
                 return realpath($unique);
@@ -208,6 +208,14 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
         }
 
         return new ApplicationTester($application);
+    }
+
+    /**
+     * Trims the entire string but also the trailing spaces off of every line
+     */
+    protected function trimLines(string $str): string
+    {
+        return trim(Preg::replace('{^(.*?) *$}m', '$1', $str));
     }
 
     protected static function getVersionParser(): VersionParser
@@ -347,7 +355,6 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
     {
         if (Platform::isWindows()) {
             $cmd = Preg::replaceCallback("/('[^']*')/", static function ($m) {
-                assert(is_string($m[1]));
                 // Double-quotes are used only when needed
                 $char = (strpbrk($m[1], " \t^&|<>()") !== false || $m[1] === "''") ? '"' : '';
 
