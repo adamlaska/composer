@@ -102,6 +102,9 @@ Out of the box, Composer supports four types:
 - **composer-plugin:** A package of type `composer-plugin` may provide an
   installer for other packages that have a custom type. Read more in the
   [dedicated article](articles/custom-installers.md).
+- **php-ext** and **php-ext-zend**: These names are reserved for PHP extension
+  packages which are written in C. Do not use these types for packages written
+  in PHP.
 
 Only use a custom type if you need custom logic during installation. It is
 recommended to omit this field and have it default to `library`.
@@ -123,6 +126,11 @@ Examples:
 > `--dev` option to prompt users if they would like to add these packages to
 > `require-dev` instead of `require`. These are: `dev`, `testing`, `static analysis`.
 
+> **Note**: The range of characters allowed inside the string is restricted to
+> unicode letters or numbers, space `" "`, dot `.`, underscore `_` and dash `-`. (Regex: `'{^[\p{N}\p{L} ._-]+$}u'`)
+> Using other characters will emit a warning when running `composer validate` and
+> will cause the package to fail updating on Packagist.org.
+
 Optional.
 
 ### homepage
@@ -143,7 +151,7 @@ Optional.
 
 Release date of the version.
 
-Must be in `YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS` format.
+Must be in `YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS` format in UTC timezone.
 
 Optional.
 
@@ -964,6 +972,23 @@ Use `"abandoned": "monolog/monolog"` to indicate this package is abandoned, and 
 the recommended alternative is `monolog/monolog`.
 
 Defaults to false.
+
+Optional.
+
+### _comment
+
+Top level key used as a place to store comments (it can be a string or array of strings).
+
+```json
+{
+    "_comment": [
+        "The package foo/bar was required for business logic",
+        "Remove package foo/baz when removing foo/bar"
+    ]
+}
+```
+
+Defaults to empty.
 
 Optional.
 

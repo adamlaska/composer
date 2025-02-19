@@ -15,7 +15,6 @@ namespace Composer\Test\Advisory;
 use Composer\Advisory\PartialSecurityAdvisory;
 use Composer\Advisory\SecurityAdvisory;
 use Composer\IO\BufferIO;
-use Composer\IO\NullIO;
 use Composer\Package\CompletePackage;
 use Composer\Package\Package;
 use Composer\Package\Version\VersionParser;
@@ -38,7 +37,7 @@ class AuditorTest extends TestCase
                 ],
                 'warningOnly' => true,
             ],
-            'expected' => 0,
+            'expected' => Auditor::STATUS_OK,
             'output' => 'No security vulnerability advisories found.',
         ];
 
@@ -51,9 +50,10 @@ class AuditorTest extends TestCase
                 ],
                 'warningOnly' => true,
             ],
-            'expected' => 1,
+            'expected' => Auditor::STATUS_VULNERABLE,
             'output' => '<warning>Found 2 security vulnerability advisories affecting 1 package:</warning>
 Package: vendor1/package1
+Severity: high
 CVE: CVE3
 Title: advisory4
 URL: https://advisory.example.com/advisory4
@@ -61,6 +61,7 @@ Affected versions: >=8,<8.2.2|>=1,<2.5.6
 Reported at: 2022-05-25T13:21:00+00:00
 --------
 Package: vendor1/package1
+Severity: medium
 CVE: '.'
 Title: advisory5
 URL: https://advisory.example.com/advisory5
@@ -82,7 +83,7 @@ Reported at: 2022-05-25T13:21:00+00:00',
                 'warningOnly' => false,
                 'abandoned' => Auditor::ABANDONED_IGNORE,
             ],
-            'expected' => 0,
+            'expected' => Auditor::STATUS_OK,
             'output' => 'No security vulnerability advisories found.',
         ];
 
@@ -95,7 +96,7 @@ Reported at: 2022-05-25T13:21:00+00:00',
                 'warningOnly' => true,
                 'abandoned' => Auditor::ABANDONED_REPORT,
             ],
-            'expected' => 0,
+            'expected' => Auditor::STATUS_OK,
             'output' => 'No security vulnerability advisories found.
 Found 2 abandoned packages:
 vendor/abandoned is abandoned. Use foo/bar instead.
@@ -112,8 +113,48 @@ vendor/abandoned2 is abandoned. No replacement was suggested.',
                 'abandoned' => Auditor::ABANDONED_FAIL,
                 'format' => Auditor::FORMAT_TABLE,
             ],
-            'expected' => 2,
+            'expected' => Auditor::STATUS_ABANDONED,
             'output' => 'No security vulnerability advisories found.
+Found 2 abandoned packages:
++-------------------+----------------------------------------------------------------------------------+
+| Abandoned Package | Suggested Replacement                                                            |
++-------------------+----------------------------------------------------------------------------------+
+| vendor/abandoned  | foo/bar                                                                          |
+| vendor/abandoned2 | none                                                                             |
++-------------------+----------------------------------------------------------------------------------+',
+        ];
+
+        yield 'vulnerable and abandoned packages fails' => [
+            'data' => [
+                'packages' => [
+                    new Package('vendor1/package1', '8.2.1', '8.2.1'),
+                    $abandonedWithReplacement,
+                    $abandonedNoReplacement,
+                ],
+                'warningOnly' => false,
+                'abandoned' => Auditor::ABANDONED_FAIL,
+                'format' => Auditor::FORMAT_TABLE,
+            ],
+            'expected' => Auditor::STATUS_VULNERABLE | Auditor::STATUS_ABANDONED,
+            'output' => 'Found 2 security vulnerability advisories affecting 1 package:
++-------------------+----------------------------------------------------------------------------------+
+| Package           | vendor1/package1                                                                 |
+| Severity          | high                                                                             |
+| CVE               | CVE3                                                                             |
+| Title             | advisory4                                                                        |
+| URL               | https://advisory.example.com/advisory4                                           |
+| Affected versions | >=8,<8.2.2|>=1,<2.5.6                                                            |
+| Reported at       | 2022-05-25T13:21:00+00:00                                                        |
++-------------------+----------------------------------------------------------------------------------+
++-------------------+----------------------------------------------------------------------------------+
+| Package           | vendor1/package1                                                                 |
+| Severity          | medium                                                                           |
+| CVE               |                                                                                  |
+| Title             | advisory5                                                                        |
+| URL               | https://advisory.example.com/advisory5                                           |
+| Affected versions | >=8,<8.2.2|>=1,<2.5.6                                                            |
+| Reported at       | 2022-05-25T13:21:00+00:00                                                        |
++-------------------+----------------------------------------------------------------------------------+
 Found 2 abandoned packages:
 +-------------------+----------------------------------------------------------------------------------+
 | Abandoned Package | Suggested Replacement                                                            |
@@ -133,7 +174,7 @@ Found 2 abandoned packages:
                 'abandoned' => Auditor::ABANDONED_FAIL,
                 'format' => Auditor::FORMAT_JSON,
             ],
-            'expected' => 2,
+            'expected' => Auditor::STATUS_ABANDONED,
             'output' => '{
     "advisories": [],
     "abandoned": {
@@ -155,11 +196,12 @@ Found 2 abandoned packages:
         }
         $auditor = new Auditor();
         $result = $auditor->audit($io = new BufferIO(), $this->getRepoSet(), $data['packages'], $data['format'] ?? Auditor::FORMAT_PLAIN, $data['warningOnly'], [], $data['abandoned'] ?? Auditor::ABANDONED_IGNORE);
-        $this->assertSame($expected, $result);
-        $this->assertSame($output, trim(str_replace("\r", '', $io->getOutput())));
+        self::assertSame($expected, $result);
+        self::assertSame($output, trim(str_replace("\r", '', $io->getOutput())));
     }
 
-    public function ignoredIdsProvider(): \Generator {
+    public function ignoredIdsProvider(): \Generator
+    {
         yield 'ignore by CVE' => [
             [
                 new Package('vendor1/package1', '3.0.0.0', '3.0.0'),
@@ -169,12 +211,13 @@ Found 2 abandoned packages:
             [
                 ['text' => 'Found 1 ignored security vulnerability advisory affecting 1 package:'],
                 ['text' => 'Package: vendor1/package1'],
+                ['text' => 'Severity: medium'],
                 ['text' => 'CVE: CVE1'],
                 ['text' => 'Title: advisory1'],
                 ['text' => 'URL: https://advisory.example.com/advisory1'],
                 ['text' => 'Affected versions: >=3,<3.4.3|>=1,<2.5.6'],
                 ['text' => 'Reported at: 2022-05-25T13:21:00+00:00'],
-            ]
+            ],
         ];
         yield 'ignore by CVE with reasoning' => [
             [
@@ -185,13 +228,14 @@ Found 2 abandoned packages:
             [
                 ['text' => 'Found 1 ignored security vulnerability advisory affecting 1 package:'],
                 ['text' => 'Package: vendor1/package1'],
+                ['text' => 'Severity: medium'],
                 ['text' => 'CVE: CVE1'],
                 ['text' => 'Title: advisory1'],
                 ['text' => 'URL: https://advisory.example.com/advisory1'],
                 ['text' => 'Affected versions: >=3,<3.4.3|>=1,<2.5.6'],
                 ['text' => 'Reported at: 2022-05-25T13:21:00+00:00'],
                 ['text' => 'Ignore reason: A good reason'],
-            ]
+            ],
         ];
         yield 'ignore by advisory id' => [
             [
@@ -202,12 +246,13 @@ Found 2 abandoned packages:
             [
                 ['text' => 'Found 1 ignored security vulnerability advisory affecting 1 package:'],
                 ['text' => 'Package: vendor1/package2'],
+                ['text' => 'Severity: medium'],
                 ['text' => 'CVE: '],
                 ['text' => 'Title: advisory2'],
                 ['text' => 'URL: https://advisory.example.com/advisory2'],
                 ['text' => 'Affected versions: >=3,<3.4.3|>=1,<2.5.6'],
                 ['text' => 'Reported at: 2022-05-25T13:21:00+00:00'],
-            ]
+            ],
         ];
         yield 'ignore by remote id' => [
             [
@@ -218,12 +263,13 @@ Found 2 abandoned packages:
             [
                 ['text' => 'Found 1 ignored security vulnerability advisory affecting 1 package:'],
                 ['text' => 'Package: vendorx/packagex'],
+                ['text' => 'Severity: medium'],
                 ['text' => 'CVE: CVE5'],
                 ['text' => 'Title: advisory17'],
                 ['text' => 'URL: https://advisory.example.com/advisory17'],
                 ['text' => 'Affected versions: >=3,<3.4.3|>=1,<2.5.6'],
                 ['text' => 'Reported at: 2015-05-25T13:21:00+00:00'],
-            ]
+            ],
         ];
         yield '1 vulnerability, 0 ignored' => [
             [
@@ -234,12 +280,13 @@ Found 2 abandoned packages:
             [
                 ['text' => 'Found 1 security vulnerability advisory affecting 1 package:'],
                 ['text' => 'Package: vendor1/package1'],
+                ['text' => 'Severity: medium'],
                 ['text' => 'CVE: CVE1'],
                 ['text' => 'Title: advisory1'],
                 ['text' => 'URL: https://advisory.example.com/advisory1'],
                 ['text' => 'Affected versions: >=3,<3.4.3|>=1,<2.5.6'],
                 ['text' => 'Reported at: 2022-05-25T13:21:00+00:00'],
-            ]
+            ],
         ];
         yield '1 vulnerability, 3 ignored affecting 2 packages' => [
             [
@@ -254,6 +301,7 @@ Found 2 abandoned packages:
             [
                 ['text' => 'Found 3 ignored security vulnerability advisories affecting 2 packages:'],
                 ['text' => 'Package: vendor2/package1'],
+                ['text' => 'Severity: medium'],
                 ['text' => 'CVE: CVE2'],
                 ['text' => 'Title: advisory3'],
                 ['text' => 'URL: https://advisory.example.com/advisory3'],
@@ -262,6 +310,7 @@ Found 2 abandoned packages:
                 ['text' => 'Ignore reason: None specified'],
                 ['text' => '--------'],
                 ['text' => 'Package: vendor2/package1'],
+                ['text' => 'Severity: medium'],
                 ['text' => 'CVE: CVE4'],
                 ['text' => 'Title: advisory6'],
                 ['text' => 'URL: https://advisory.example.com/advisory6'],
@@ -270,6 +319,7 @@ Found 2 abandoned packages:
                 ['text' => 'Ignore reason: None specified'],
                 ['text' => '--------'],
                 ['text' => 'Package: vendorx/packagex'],
+                ['text' => 'Severity: medium'],
                 ['text' => 'CVE: CVE5'],
                 ['text' => 'Title: advisory17'],
                 ['text' => 'URL: https://advisory.example.com/advisory17'],
@@ -278,12 +328,13 @@ Found 2 abandoned packages:
                 ['text' => 'Ignore reason: None specified'],
                 ['text' => 'Found 1 security vulnerability advisory affecting 1 package:'],
                 ['text' => 'Package: vendor3/package1'],
+                ['text' => 'Severity: medium'],
                 ['text' => 'CVE: CVE5'],
                 ['text' => 'Title: advisory7'],
                 ['text' => 'URL: https://advisory.example.com/advisory7'],
                 ['text' => 'Affected versions: >=3,<3.4.3|>=1,<2.5.6'],
                 ['text' => 'Reported at: 2015-05-25T13:21:00+00:00'],
-            ]
+            ],
         ];
     }
 
@@ -299,7 +350,56 @@ Found 2 abandoned packages:
         $auditor = new Auditor();
         $result = $auditor->audit($io = $this->getIOMock(), $this->getRepoSet(), $packages, Auditor::FORMAT_PLAIN, false, $ignoredIds);
         $io->expects($expectedOutput, true);
-        $this->assertSame($exitCode, $result);
+        self::assertSame($exitCode, $result);
+    }
+
+    public function ignoreSeverityProvider(): \Generator
+    {
+        yield 'ignore medium' => [
+            [
+                new Package('vendor1/package1', '2.0.0.0', '2.0.0'),
+            ],
+            ['medium'],
+            1,
+            [
+                ['text' => 'Found 2 ignored security vulnerability advisories affecting 1 package:'],
+            ],
+        ];
+        yield 'ignore high' => [
+            [
+                new Package('vendor1/package1', '2.0.0.0', '2.0.0'),
+            ],
+            ['high'],
+            1,
+            [
+                ['text' => 'Found 1 ignored security vulnerability advisory affecting 1 package:'],
+            ],
+        ];
+        yield 'ignore high and medium' => [
+            [
+                new Package('vendor1/package1', '2.0.0.0', '2.0.0'),
+            ],
+            ['high', 'medium'],
+            0,
+            [
+                ['text' => 'Found 3 ignored security vulnerability advisories affecting 1 package:'],
+            ],
+        ];
+    }
+
+    /**
+     * @dataProvider ignoreSeverityProvider
+     * @phpstan-param array<\Composer\Package\Package> $packages
+     * @phpstan-param array<string> $ignoredSeverities
+     * @phpstan-param 0|positive-int $exitCode
+     * @phpstan-param list<array{text: string, verbosity?: \Composer\IO\IOInterface::*, regex?: true}|array{ask: string, reply: string}|array{auth: array{string, string, string|null}}> $expectedOutput
+     */
+    public function testAuditWithIgnoreSeverity($packages, $ignoredSeverities, $exitCode, $expectedOutput): void
+    {
+        $auditor = new Auditor();
+        $result = $auditor->audit($io = $this->getIOMock(), $this->getRepoSet(), $packages, Auditor::FORMAT_PLAIN, false, [], Auditor::ABANDONED_IGNORE, $ignoredSeverities);
+        $io->expects($expectedOutput, true);
+        self::assertSame($exitCode, $result);
     }
 
     private function getRepoSet(): RepositorySet
@@ -380,6 +480,7 @@ Found 2 abandoned packages:
                     ],
                     'reportedAt' => '2022-05-25 13:21:00',
                     'composerRepository' => 'https://packagist.org',
+                    'severity' => 'medium',
                 ],
                 [
                     'advisoryId' => 'ID4',
@@ -396,6 +497,7 @@ Found 2 abandoned packages:
                     ],
                     'reportedAt' => '2022-05-25 13:21:00',
                     'composerRepository' => 'https://packagist.org',
+                    'severity' => 'high',
                 ],
                 [
                     'advisoryId' => 'ID5',
@@ -412,6 +514,7 @@ Found 2 abandoned packages:
                     ],
                     'reportedAt' => '2022-05-25 13:21:00',
                     'composerRepository' => 'https://packagist.org',
+                    'severity' => 'medium',
                 ],
             ],
             'vendor1/package2' => [
@@ -430,6 +533,7 @@ Found 2 abandoned packages:
                     ],
                     'reportedAt' => '2022-05-25 13:21:00',
                     'composerRepository' => 'https://packagist.org',
+                    'severity' => 'medium',
                 ],
             ],
             'vendorx/packagex' => [
@@ -448,6 +552,7 @@ Found 2 abandoned packages:
                     ],
                     'reportedAt' => '2015-05-25 13:21:00',
                     'composerRepository' => 'https://packagist.org',
+                    'severity' => 'medium',
                 ],
             ],
             'vendor2/package1' => [
@@ -466,6 +571,7 @@ Found 2 abandoned packages:
                     ],
                     'reportedAt' => '2022-05-25 13:21:00',
                     'composerRepository' => 'https://packagist.org',
+                    'severity' => 'medium',
                 ],
                 [
                     'advisoryId' => 'ID6',
@@ -482,6 +588,7 @@ Found 2 abandoned packages:
                     ],
                     'reportedAt' => '2015-05-25 13:21:00',
                     'composerRepository' => 'https://packagist.org',
+                    'severity' => 'medium',
                 ],
             ],
             'vendory/packagey' => [
@@ -500,6 +607,7 @@ Found 2 abandoned packages:
                     ],
                     'reportedAt' => '2015-05-25 13:21:00',
                     'composerRepository' => 'https://packagist.org',
+                    'severity' => 'medium',
                 ],
             ],
             'vendor3/package1' => [
@@ -518,6 +626,7 @@ Found 2 abandoned packages:
                     ],
                     'reportedAt' => '2015-05-25 13:21:00',
                     'composerRepository' => 'https://packagist.org',
+                    'severity' => 'medium',
                 ],
             ],
         ];
